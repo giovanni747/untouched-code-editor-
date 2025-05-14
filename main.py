@@ -20,11 +20,11 @@ import re
 
 # Configure logging
 logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO,  # Changed level to INFO as DEBUG is verbose for console
+    format='%(asctime)s - %(levelname)s - %(message)s', # Simplified format for console
     handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler('app_debug.log')
+        logging.StreamHandler() # Keep only console output
+        # logging.FileHandler('app_debug.log') # Removed file handler
     ]
 )
 logger = logging.getLogger(__name__)
@@ -62,34 +62,34 @@ class GestureRecognitionThread(QThread):
         
         # Gesture tracking state
         self.running = True
-        self.gestures = {
-            "two_fingers": "if",      # Two fingers extended - add if statement
-            "three_fingers": "for",   # Three fingers extended - add for loop
-            "fist": "execute",        # Closed fist - execute code
-            "hand_swipe": "indent",   # Hand swipe right - indent code
-            "hand_swipe_left": "unindent"  # Hand swipe left - unindent code
+        self.gestures = { # Defines mapping from simple finger counts/states to command names
+            "two_fingers": "if",
+            "three_fingers": "for",
+            "fist": "execute",
+            "hand_swipe": "indent",
+            "hand_swipe_left": "unindent"
         }
         self.last_gesture = None
-        self.gesture_cooldown = 1.0  # Cooldown to prevent rapid repeated gestures
+        self.gesture_cooldown = 1.0  # Prevents rapid firing of the same gesture
         self.last_gesture_time = 0
         
-        # MediaPipe setup
+        # MediaPipe setup for hand tracking
         self.mp_hands = mp.solutions.hands
         self.hands = self.mp_hands.Hands(
-            static_image_mode=False,
+            static_image_mode=False, # Process video stream
             max_num_hands=2,
             min_detection_confidence=0.7,
             min_tracking_confidence=0.5
         )
-        self.mp_draw = mp.solutions.drawing_utils
+        self.mp_draw = mp.solutions.drawing_utils # For drawing landmarks
         
     def stop(self):
-        """Stop the thread execution."""
+        """Stop the thread execution gracefully."""
         self.running = False
-        self.wait()
+        self.wait() # Wait for the run loop to finish
     
     def detect_gesture(self, hand_landmarks):
-        """Detect which gesture is being performed."""
+        """Detects specific gestures based on finger extension and applies a cooldown."""
         # Get fingertip y-positions relative to base
         fingertips = [hand_landmarks.landmark[i] for i in [4, 8, 12, 16, 20]]  # Thumb, index, middle, ring, pinky
         finger_bases = [hand_landmarks.landmark[i] for i in [2, 5, 9, 13, 17]]  # Base of each finger
@@ -106,9 +106,9 @@ class GestureRecognitionThread(QThread):
         current_time = time.time()
         
         # Simple gesture detection based on fingers up
-        if current_time - self.last_gesture_time > self.gesture_cooldown:
+        if current_time - self.last_gesture_time > self.gesture_cooldown: # Check if cooldown has passed
             # One finger up - move up
-            if sum(fingers_up) == 1 and fingers_up[1]:
+            if sum(fingers_up) == 1 and fingers_up[1]: # Index finger
                 self.last_gesture_time = current_time
                 return "scroll_up"
             
@@ -123,17 +123,17 @@ class GestureRecognitionThread(QThread):
                 return "thorns"
             
             # Closed fist - unindent
-            elif sum(fingers_up) == 0:
+            elif sum(fingers_up) == 0: # No fingers extended
                 self.last_gesture_time = current_time
                 return "fist"
         
-        return None
+        return None # No gesture detected or cooldown active
 
     def run(self):
-        """Main thread loop."""
-        cap = cv2.VideoCapture(0)
+        """Main loop for capturing video, processing hand landmarks, and emitting gesture signals."""
+        cap = cv2.VideoCapture(0) # Initialize video capture
         
-        # Set camera resolution for better performance
+        # Set camera resolution to balance performance and accuracy
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
         
@@ -143,14 +143,14 @@ class GestureRecognitionThread(QThread):
                 if not ret:
                     continue
                 
-                # Flip frame horizontally for more intuitive interaction
+                # Flip frame horizontally for a more intuitive mirror-like interaction
                 frame = cv2.flip(frame, 1)
                 
-                # Convert to RGB for MediaPipe
+                # Convert to RGB for MediaPipe processing
                 rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                results = self.hands.process(rgb_frame)
+                results = self.hands.process(rgb_frame) # Process frame for hand landmarks
                 
-                # Draw hand landmarks
+                # Draw hand landmarks on the frame for visual feedback
                 if results.multi_hand_landmarks:
                     for hand_landmarks in results.multi_hand_landmarks:
                         self.mp_draw.draw_landmarks(
@@ -159,23 +159,23 @@ class GestureRecognitionThread(QThread):
                             self.mp_hands.HAND_CONNECTIONS
                         )
                         
-                        # Detect gesture
+                        # Detect gesture from landmarks
                         gesture = self.detect_gesture(hand_landmarks)
                         if gesture:
-                            # Emit signal through parent's signals object
+                            # Emit signal if a gesture is recognized
                             if hasattr(self.parent(), 'signals'):
                                 self.parent().signals.gesture_detected.emit(gesture)
                 
-                # Convert the frame to QImage for display
+                # Convert the OpenCV frame (BGR) to QImage (RGB) for display in PyQt
                 h, w, ch = frame.shape
                 bytes_per_line = ch * w
                 qt_image = QImage(frame.data, w, h, bytes_per_line, QImage.Format_RGB888)
                 
-                # Emit the frame through parent's signals object
+                # Emit the processed frame for UI update
                 if hasattr(self.parent(), 'signals'):
                     self.parent().signals.update_frame.emit(qt_image)
                 
-                # Sleep to reduce CPU usage
+                # Brief sleep to reduce CPU load from constant processing
                 time.sleep(0.01)
                 
             except Exception as e:
@@ -191,7 +191,7 @@ class SpeechRecognitionThread(QThread):
         super().__init__(parent)
         self.running = True
         
-        # Commands that can be recognized
+        # Defines a mapping of spoken phrases to internal command identifiers
         self.commands = {
             "execute": "execute",
             "clear": "clear",
@@ -215,24 +215,27 @@ class SpeechRecognitionThread(QThread):
         }
     
     def stop(self):
-        """Stop the thread execution."""
+        """Stop the thread execution gracefully."""
         self.running = False
-        self.wait()
+        self.wait() # Wait for the run loop to finish
     
     def run(self):
-        """Main thread loop."""
+        """Main loop for listening to microphone input, recognizing speech, and emitting command signals."""
         recognizer = sr.Recognizer()
         
         while self.running:
             try:
                 with sr.Microphone() as source:
+                    # Adjust for ambient noise to improve recognition accuracy
                     recognizer.adjust_for_ambient_noise(source, duration=0.5)
+                    # Listen for speech input with timeouts to prevent blocking
                     audio = recognizer.listen(source, timeout=2, phrase_time_limit=5)
                 
                 try:
+                    # Use Google Web Speech API for recognition
                     text = recognizer.recognize_google(audio).lower()
                     
-                    # Check for custom variable command
+                    # Custom handling for "variable" command to extract name and value
                     if "variable" in text:
                         words = text.split()
                         if len(words) >= 2:
@@ -247,20 +250,21 @@ class SpeechRecognitionThread(QThread):
                                         var_value = words[i]
                                         break
                                 
-                                # Send custom variable command
+                                # Send custom variable command in format "variable:name:value"
                                 if hasattr(self.parent(), 'signals'):
                                     self.parent().signals.speech_detected.emit(f"variable:{var_name}:{var_value}")
-                                continue
+                                continue # Skip further command checks
                     
-                    # Check for print command with content
+                    # Custom handling for "print" command to extract content to print
                     elif "print" in text and text != "print":
                         content = text.replace("print", "", 1).strip()
                         if content:
+                            # Send custom print command in format "print:content"
                             if hasattr(self.parent(), 'signals'):
                                 self.parent().signals.speech_detected.emit(f"print:{content}")
-                            continue
+                            continue # Skip further command checks
                     
-                    # Check for regular commands
+                    # Check for other predefined commands
                     command_found = False
                     for command, action in self.commands.items():
                         if command in text:
@@ -326,81 +330,81 @@ class CodeEditor(QTextEdit):
     def __init__(self, parent=None):
         super().__init__(parent)
         
-        # Set up a monospaced font
+        # Set up a monospaced font suitable for coding
         font = QFont()
         font.setFamily("Courier")
         font.setFixedPitch(True)
         font.setPointSize(11)
         self.setFont(font)
         
-        # Set up the highlighter
+        # Set up the custom Python syntax highlighter
         self.highlighter = PythonHighlighter(self.document())
         
-        # Set tab width to 4 spaces
-        self.setTabStopDistance(40)
+        # Set tab width to a standard 4 spaces for Python
+        self.setTabStopDistance(40) # 4 spaces * 10 (typical point size)
         
-        # Set up cursor highlighting
+        # Connect cursor position changes to the highlighting function
         self.cursorPositionChanged.connect(self.highlight_current_line)
         
         # Current variable for increment
         self.current_variable = "var"
         
     def highlight_current_line(self):
-        """Highlight the line where the cursor is positioned."""
+        """Highlights the entire line where the text cursor is currently located."""
         extraSelections = []
         
-        if not self.isReadOnly():
+        if not self.isReadOnly(): # Only highlight if editable
             selection = QTextEdit.ExtraSelection()
             
-            # Use a more visible background color with better contrast
-            lineColor = QColor(60, 80, 100)  # Blue-gray background for better visibility
+            # Define the background color for the current line highlight
+            lineColor = QColor(60, 80, 100)
             selection.format.setBackground(lineColor)
-            selection.format.setProperty(QTextFormat.FullWidthSelection, True)
+            selection.format.setProperty(QTextFormat.FullWidthSelection, True) # Ensure full line width
             
             selection.cursor = self.textCursor()
-            selection.cursor.clearSelection()
+            selection.cursor.clearSelection() # Important to avoid interfering with user selections
             
             extraSelections.append(selection)
         
-        self.setExtraSelections(extraSelections)
+        self.setExtraSelections(extraSelections) # Apply the highlight
     
     def move_cursor_up(self):
-        """Move cursor up one line."""
+        """Move cursor up one line and update highlighting."""
         cursor = self.textCursor()
         cursor.movePosition(QTextCursor.Up)
         self.setTextCursor(cursor)
-        self.highlight_current_line()
+        self.highlight_current_line() # Re-apply highlight after cursor move
     
     def move_cursor_down(self):
-        """Move cursor down one line."""
+        """Move cursor down one line and update highlighting."""
         cursor = self.textCursor()
         cursor.movePosition(QTextCursor.Down)
         self.setTextCursor(cursor)
-        self.highlight_current_line()
+        self.highlight_current_line() # Re-apply highlight after cursor move
     
     def move_cursor_to_start(self):
-        """Move cursor to the start of the document."""
+        """Move cursor to the start of the document and update highlighting."""
         cursor = self.textCursor()
         cursor.movePosition(QTextCursor.Start)
         self.setTextCursor(cursor)
-        self.highlight_current_line()
+        self.highlight_current_line() # Re-apply highlight after cursor move
     
     def move_cursor_to_end(self):
-        """Move cursor to the end of the document."""
+        """Move cursor to the end of the document and update highlighting."""
         cursor = self.textCursor()
         cursor.movePosition(QTextCursor.End)
         self.setTextCursor(cursor)
-        self.highlight_current_line()
+        self.highlight_current_line() # Re-apply highlight after cursor move
 
 class PythonHighlighter(QSyntaxHighlighter):
-    """Syntax highlighter for Python code."""
+    """Syntax highlighter for Python code using regular expressions."""
     
     def __init__(self, parent=None):
         super().__init__(parent)
         
-        self.highlighting_rules = []
+        self.highlighting_rules = [] # List to store (pattern, format) tuples
         
-        # Keyword format
+        # Keyword format (e.g., def, for, if)
         keyword_format = QTextCharFormat()
         keyword_format.setForeground(QColor("#569CD6"))  # Blue
         keyword_format.setFontWeight(QFont.Bold)
@@ -416,69 +420,70 @@ class PythonHighlighter(QSyntaxHighlighter):
             pattern = f"\\b{word}\\b"
             self.highlighting_rules.append((re.compile(pattern), keyword_format))
         
-        # String format
+        # String format (e.g., "hello", 'world')
         string_format = QTextCharFormat()
         string_format.setForeground(QColor("#CE9178"))  # Orange
-        self.highlighting_rules.append((re.compile('".*?"'), string_format))
-        self.highlighting_rules.append((re.compile("'.*?'"), string_format))
+        self.highlighting_rules.append((re.compile('".*?"'), string_format)) # Double quotes
+        self.highlighting_rules.append((re.compile("'.*?'"), string_format)) # Single quotes
         
-        # Comment format
+        # Comment format (e.g., # This is a comment)
         comment_format = QTextCharFormat()
         comment_format.setForeground(QColor("#6A9955"))  # Green
         self.highlighting_rules.append((re.compile("#.*"), comment_format))
         
-        # Function format
+        # Function call/definition format (e.g., my_function(), def my_func)
         function_format = QTextCharFormat()
         function_format.setForeground(QColor("#DCDCAA"))  # Yellow
-        self.highlighting_rules.append((re.compile("\\b[A-Za-z0-9_]+(?=\\()"), function_format))
+        self.highlighting_rules.append((re.compile("\\b[A-Za-z0-9_]+(?=\\()"), function_format)) # Matches names followed by (
         
-        # Number format
+        # Number format (e.g., 123, 0.5)
         number_format = QTextCharFormat()
         number_format.setForeground(QColor("#B5CEA8"))  # Light green
         self.highlighting_rules.append((re.compile("\\b\\d+\\b"), number_format))
     
     def highlightBlock(self, text):
-        """Apply highlighting to the given block of text."""
-        for pattern, format in self.highlighting_rules:
+        """Apply highlighting rules to the given block of text (typically one line)."""
+        for pattern, format_rule in self.highlighting_rules:
+            # Iterate over all matches for the current rule's pattern in the text
             for match in pattern.finditer(text):
                 start = match.start()
                 length = match.end() - start
-                self.setFormat(start, length, format)
+                self.setFormat(start, length, format_rule) # Apply the format
 
 class GestureProgrammingApp(QMainWindow):
-    """Main application window."""
+    """Main application window, orchestrating UI, threads, and logic."""
     
     def __init__(self):
         super().__init__()
         
-        # Initialize signals for thread-safe UI updates
+        # Initialize signals for thread-safe UI updates from background threads
         self.signals = Signals()
         
-        # Initialize UI
+        # Setup the main UI components
         self.init_ui()
         
-        # Initialize code blocks
+        # Initialize state for managing code blocks and indentation
         self.code_blocks = []
         self.current_indent = 0
         
-        # Connect signals
+        # Connect signals from background threads and UI elements to handler methods
         self.connect_signals()
         
-        # Start background threads
+        # Start the gesture and speech recognition threads
         self.start_background_threads()
         
-        # Add a test message after a short delay
+        # Display a welcome message and code template after a short delay
         QTimer.singleShot(1000, self.add_welcome_message)
         
-        # Stored variable for increment functionality
+        # Stores the name of the last variable created, for the "increment" command
         self.last_variable = "var"
     
     def init_ui(self):
-        """Initialize the user interface."""
+        """Initialize the main user interface layout and components."""
         self.setWindowTitle("Gesture Programming Environment")
         self.setGeometry(100, 100, 1200, 800)
         
-        # Set application style with dark theme colors
+        # Apply a dark theme stylesheet for the application
         self.setStyleSheet("""
             QMainWindow {
                 background-color: #1E1E1E;
@@ -526,7 +531,7 @@ class GestureProgrammingApp(QMainWindow):
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
         
-        # Title and status area
+        # Top bar layout for title and status label
         top_bar = QHBoxLayout()
         title = QLabel("Gesture Programming Environment")
         title.setStyleSheet("font-size: 24px; font-weight: bold;")
@@ -539,21 +544,21 @@ class GestureProgrammingApp(QMainWindow):
         
         main_layout.addLayout(top_bar)
         
-        # Create splitter for resizable sections
+        # Create a QSplitter to allow resizable sections for camera/instructions and editor/output
         splitter = QSplitter(Qt.Horizontal)
         
-        # Left side - Camera view and instructions
+        # Left panel: Camera feed and instructions
         left_widget = QWidget()
         left_layout = QVBoxLayout(left_widget)
         
-        # Camera view
+        # Camera view label, displays processed frames from GestureRecognitionThread
         self.camera_label = QLabel()
         self.camera_label.setMinimumSize(640, 480)
         self.camera_label.setAlignment(Qt.AlignCenter)
         self.camera_label.setStyleSheet("background-color: #000000; border: 1px solid #3E3E3E;")
         left_layout.addWidget(self.camera_label)
         
-        # Gesture instructions
+        # Instructions panel displaying available gestures and voice commands
         instructions = QTextEdit()
         instructions.setReadOnly(True)
         instructions.setHtml("""
@@ -590,11 +595,11 @@ class GestureProgrammingApp(QMainWindow):
         left_widget.setLayout(left_layout)
         splitter.addWidget(left_widget)
         
-        # Right side - Code editor and output console
+        # Right panel: Code editor, control buttons, and output console
         right_widget = QWidget()
         right_layout = QVBoxLayout(right_widget)
         
-        # Control buttons
+        # Layout for control buttons (Execute, Clear, Save)
         control_layout = QHBoxLayout()
         
         # Execute button
@@ -614,7 +619,7 @@ class GestureProgrammingApp(QMainWindow):
         
         right_layout.addLayout(control_layout)
         
-        # Code editor
+        # Code editor widget where users write/dictate Python code
         self.code_editor = CodeEditor()
         self.code_editor.setStyleSheet("""
             QTextEdit {
@@ -628,7 +633,7 @@ class GestureProgrammingApp(QMainWindow):
         self.code_editor.setPlaceholderText("Your code will appear here...")
         right_layout.addWidget(self.code_editor)
         
-        # Output console
+        # Output console to display results of code execution or errors
         self.output_console = QTextEdit()
         self.output_console.setReadOnly(True)
         self.output_console.setStyleSheet("""
@@ -647,32 +652,36 @@ class GestureProgrammingApp(QMainWindow):
         right_widget.setLayout(right_layout)
         splitter.addWidget(right_widget)
         
-        # Set initial splitter sizes
+        # Set initial relative sizes for the splitter panels
         splitter.setSizes([400, 800])
         
         main_layout.addWidget(splitter)
     
     def connect_signals(self):
-        """Connect all signals to their handlers."""
+        """Connect signals from various components to their respective slot handlers."""
+        # Connect gesture thread signals for UI updates
         self.signals.update_frame.connect(self.update_camera_view, Qt.QueuedConnection)
         self.signals.gesture_detected.connect(self.handle_gesture, Qt.QueuedConnection)
+        # Connect speech thread signal
         self.signals.speech_detected.connect(self.handle_speech, Qt.QueuedConnection)
+        # Connect status update signal (can be emitted from various parts)
         self.signals.status_updated.connect(self.update_status, Qt.QueuedConnection)
     
     def start_background_threads(self):
-        """Start background threads for gesture and speech recognition."""
-        # Initialize and start gesture recognition thread
+        """Initialize and start the gesture and speech recognition background threads."""
+        # Gesture recognition thread
         self.gesture_thread = GestureRecognitionThread(self)
         self.gesture_thread.start()
         
-        # Initialize and start speech recognition thread
+        # Speech recognition thread
         self.speech_thread = SpeechRecognitionThread(self)
         self.speech_thread.start()
     
     @pyqtSlot(QImage)
     def update_camera_view(self, image):
-        """Update camera view with the latest frame."""
+        """Update the camera view QLabel with the new QImage frame from the gesture thread."""
         pixmap = QPixmap.fromImage(image)
+        # Scale pixmap to fit the label while maintaining aspect ratio
         self.camera_label.setPixmap(pixmap.scaled(
             self.camera_label.size(),
             Qt.KeepAspectRatio,
@@ -681,55 +690,55 @@ class GestureProgrammingApp(QMainWindow):
     
     @pyqtSlot(str)
     def handle_gesture(self, gesture):
-        """Handle detected gestures."""
+        """Process a recognized gesture string from the gesture thread."""
         try:
-            self.process_gesture(gesture)
+            self.process_gesture(gesture) # Internal method to map gesture to action
             self.signals.status_updated.emit(f"Gesture detected: {gesture}")
         except Exception as e:
-            pass
+            logger.error(f"Error handling gesture '{gesture}': {e}") # Log errors
     
     @pyqtSlot(str)
     def handle_speech(self, command):
-        """Handle speech commands."""
+        """Process a recognized speech command string from the speech thread."""
         try:
-            # Handle custom commands with parameters
+            # Handle commands that include parameters (e.g., "variable:name:value", "print:content")
             if ":" in command:
                 parts = command.split(":", 1)
                 cmd_type = parts[0]
                 cmd_value = parts[1]
                 
                 if cmd_type == "variable":
-                    # Format: variable:name:value
+                    # Handles "variable:var_name:var_value" command
                     var_parts = cmd_value.split(":", 1)
                     var_name = var_parts[0]
-                    var_value = var_parts[1] if len(var_parts) > 1 else "0"
+                    var_value = var_parts[1] if len(var_parts) > 1 else "0" # Default value if not provided
                     code = f"{var_name} = {var_value}"
                     
                     cursor = self.code_editor.textCursor()
-                    if cursor.positionInBlock() > 0:
+                    if cursor.positionInBlock() > 0: # Add newline if not at start of line
                         cursor.insertText("\n")
                     indentation = "    " * self.current_indent
                     cursor.insertText(f"{indentation}{code}")
-                    # Store variable name for increment command
+                    # Store the variable name for potential use with "increment" command
                     self.last_variable = var_name
-                    return
+                    return # Command processed
                 
                 elif cmd_type == "print":
-                    # Format: print:content
-                    # If the content is a valid variable name, print without quotes
+                    # Handles "print:content" command
                     content = cmd_value.strip()
+                    # If content is a valid Python identifier, print it as a variable, otherwise as a string
                     if content.isidentifier():
                         code = f"print({content})"
                     else:
                         code = f"print(\"{content}\")"
                     cursor = self.code_editor.textCursor()
-                    if cursor.positionInBlock() > 0:
+                    if cursor.positionInBlock() > 0: # Add newline if not at start of line
                         cursor.insertText("\n")
                     indentation = "    " * self.current_indent
                     cursor.insertText(f"{indentation}{code}")
-                    return
+                    return # Command processed
             
-            # Handle regular commands
+            # Handle simple commands without parameters
             if command == "execute":
                 self.execute_code()
             elif command == "clear":
@@ -748,13 +757,14 @@ class GestureProgrammingApp(QMainWindow):
                 cursor = self.code_editor.textCursor()
                 cursor.select(QTextCursor.LineUnderCursor)
                 cursor.removeSelectedText()
-                cursor.deleteChar()  # Delete the newline
+                cursor.deleteChar()  # Also remove the newline character after deleting the line content
                 self.code_editor.setTextCursor(cursor)
             elif command == "indent":
                 self.change_indent(1)
             elif command == "unindent":
                 self.change_indent(-1)
             elif command == "increment":
+                # Inserts an increment operation for the last defined variable
                 cursor = self.code_editor.textCursor()
                 if cursor.positionInBlock() > 0:
                     cursor.insertText("\n")
@@ -762,26 +772,25 @@ class GestureProgrammingApp(QMainWindow):
                 cursor.insertText(f"{indentation}{self.last_variable} += 1")
                 self.signals.status_updated.emit(f"Incremented {self.last_variable}")
             else:
-                # For control statements that need auto-indentation
+                # For control statements (if, for, while, def), use add_control_block for auto-indent
                 if command in CONTROL_STATEMENTS:
                     self.add_control_block(command)
-                # For other commands, add corresponding code block
+                # For other predefined code snippets, use add_code_block
                 elif command in PROGRAM_BLOCKS:
                     self.add_code_block(command)
             
             self.signals.status_updated.emit(f"Voice command detected: {command}")
         except Exception as e:
-            pass
+            logger.error(f"Error handling speech command '{command}': {e}") # Log errors
     
     def add_code_block(self, block_type):
-        """Add a code block to the editor."""
+        """Add a predefined code block (snippet) to the editor."""
         try:
             if block_type in PROGRAM_BLOCKS:
                 code = PROGRAM_BLOCKS[block_type]
                 
-                # Special handling for if statements to allow custom condition
+                # Special handling for "if" statements to allow custom condition input via dialog
                 if block_type == "if":
-                    # Create a dialog with condition options
                     dialog = QDialog(self)
                     dialog.setWindowTitle("If Statement Condition")
                     dialog_layout = QVBoxLayout()
@@ -822,24 +831,33 @@ class GestureProgrammingApp(QMainWindow):
                     
                     dialog.setLayout(dialog_layout)
                     
-                    # Show dialog and get result
+                    # Show dialog and get result; if accepted, construct "if" statement
                     if dialog.exec_() == QDialog.Accepted:
                         selected_id = button_group.checkedId()
-                        if selected_id == 4:  # Custom option
+                        # Use custom input if "Custom" radio button selected
+                        if selected_id == 4: 
                             condition = custom_input.text() if custom_input.text() else "condition == True"
                         else:
                             condition = list(condition_options.values())[selected_id]
                         
-                        # Check if it's a control statement that needs auto-indentation
-                        if block_type in CONTROL_STATEMENTS:
-                            code = f'if {condition}:\n    '
-                            return self.add_control_block("if")
-                        else:
-                            code = f'if {condition}:\n    pass'
+                        # "if" is a control statement, so use add_control_block for proper indentation
+                        # Note: The original code snippet PROGRAM_BLOCKS["if"] is used by add_control_block,
+                        # but the condition part is dynamic here.
+                        # We modify the 'code' variable for 'if' before calling add_control_block.
+                        # A small refactor might be to pass the condition to add_control_block directly for 'if'.
+                        # For now, we'll set PROGRAM_BLOCKS["if"] temporarily if needed, or handle it carefully.
+                        
+                        # Create the code with the chosen condition
+                        # The add_control_block function will then add the 'if' structure with this.
+                        # This ensures the : and subsequent auto-indent logic in add_control_block is triggered.
+                        PROGRAM_BLOCKS["if"] = f'if {condition}:\\n    ' # Temporarily update for add_control_block
+                        self.add_control_block("if")
+                        PROGRAM_BLOCKS["if"] = 'if condition == True:\\n    pass' # Restore original template
+                        return # Action complete
                     else:
-                        return  # If canceled
+                        return  # User cancelled dialog
                 
-                # Add indentation
+                # Apply current indentation level to the code block
                 if self.current_indent > 0:
                     indented_code = ""
                     for line in code.split("\n"):
@@ -864,84 +882,80 @@ class GestureProgrammingApp(QMainWindow):
                 self.code_editor.setTextCursor(cursor)
                 
             else:
-                pass
+                logger.warning(f"Attempted to add unknown code block type: {block_type}")
         except Exception as e:
-            pass
+            logger.error(f"Error adding code block '{block_type}': {e}")
     
     def add_control_block(self, block_type):
-        """Add a control block with auto-indentation."""
+        """Add a control flow statement (e.g., for, if, while, def) with auto-indentation for the next line."""
         try:
             if block_type in PROGRAM_BLOCKS:
-                code = PROGRAM_BLOCKS[block_type]
+                code = PROGRAM_BLOCKS[block_type] # Get the code template
                 
-                # Get cursor position
                 cursor = self.code_editor.textCursor()
                 
                 # If not at beginning of line, add a newline
                 if cursor.positionInBlock() > 0:
                     cursor.insertText("\n")
                 
-                # Add indentation to the block
+                # Apply current indentation to the control statement itself
                 indentation = "    " * self.current_indent
                 
-                # Split by newlines to handle multi-line blocks
+                # Handle multi-line templates correctly with current indentation
                 lines = code.split("\n")
-                indented_code = []
-                for i, line in enumerate(lines):
-                    # First line gets current indentation
-                    if i == 0:
-                        indented_code.append(indentation + line)
-                    else:
-                        # Other lines get additional indentation
-                        indented_code.append(indentation + line)
+                indented_code_lines = []
+                for i, line_content in enumerate(lines):
+                    # Apply current indent to all lines of the template.
+                    # The template itself usually has a placeholder for the next level of indent (e.g. "    pass")
+                    # or ends with a colon expecting the next line to be indented.
+                    indented_code_lines.append(indentation + line_content)
                 
-                # Join back with newlines
-                final_code = "\n".join(indented_code)
+                final_code = "\n".join(indented_code_lines)
                 
-                # Insert code
+                # Insert the control statement
                 cursor.insertText(final_code)
                 
-                # Increase indentation for next lines
+                # Increase current_indent for subsequent lines automatically after a control statement
                 self.current_indent += 1
                 
-                # Update cursor at the end of the insertion
+                # Move cursor to the end of the inserted text
                 self.code_editor.setTextCursor(cursor)
             
         except Exception as e:
-            pass
+            logger.error(f"Error adding control block '{block_type}': {e}")
     
     def change_indent(self, amount):
-        """Change the current indentation level."""
-        self.current_indent = max(0, self.current_indent + amount)
+        """Change the current indentation level for subsequently added code blocks."""
+        self.current_indent = max(0, self.current_indent + amount) # Ensure indent level doesn't go below 0
         self.signals.status_updated.emit(f"Indentation level: {self.current_indent}")
     
     def execute_code(self):
-        """Execute the code in the editor."""
+        """Execute the Python code present in the code editor and display output/errors."""
         try:
             code = self.code_editor.toPlainText()
-            if not code.strip():
+            if not code.strip(): # Check if there's any actual code
                 self.output_console.setPlainText("No code to execute")
                 return
             
-            # Redirect stdout to capture print output
+            # Redirect standard output to capture print() statements from the executed code
             import io
             from contextlib import redirect_stdout
             
             output_buffer = io.StringIO()
             try:
-                with redirect_stdout(output_buffer):
-                    # First try to compile the code to check for syntax errors
+                with redirect_stdout(output_buffer): # Capture stdout
+                    # Attempt to compile first to catch syntax errors early
                     try:
                         compiled_code = compile(code, "<string>", "exec")
-                        exec(compiled_code)
+                        exec(compiled_code) # Execute the compiled code
                     except IndentationError as ie:
+                        # Handle indentation errors specifically: try to fix and inform user
                         line_number = ie.lineno
                         error_msg = str(ie)
-                        # Try to fix indentation automatically
-                        fixed_code = self.fix_indentation(code, line_number)
-                        if fixed_code != code:
+                        fixed_code = self.fix_indentation(code, line_number) # Attempt auto-fix
+                        if fixed_code != code: # If fix was made
                             self.code_editor.setPlainText(fixed_code)
-                            # Get the error line and highlight it
+                            # Highlight the problematic line
                             cursor = self.code_editor.textCursor()
                             cursor.movePosition(QTextCursor.Start)
                             for _ in range(line_number - 1):
@@ -949,111 +963,108 @@ class GestureProgrammingApp(QMainWindow):
                             self.code_editor.setTextCursor(cursor)
                             self.code_editor.highlight_current_line()
                             
-                            if "unexpected indent" in error_msg:
-                                self.output_console.setPlainText(f"Fixed unexpected indentation at line {line_number}. Please run again.")
-                            else:
-                                self.output_console.setPlainText(f"Fixed indentation at line {line_number}. Please run again.")
+                            self.output_console.setPlainText(f"Attempted to fix indentation at line {line_number}. Please review and run again.")
                             return
                         else:
-                            raise  # Re-raise if we couldn't fix it
+                            raise # Re-raise if auto-fix didn't change anything
                     except Exception as e:
-                        # Re-raise other exceptions
+                        # Re-raise other compilation/runtime exceptions
                         raise
                 
-                output = output_buffer.getvalue()
+                output = output_buffer.getvalue() # Get captured output
                 
                 if output:
                     self.output_console.setPlainText(output)
                 else:
-                    self.output_console.setPlainText("Code executed without output")
+                    self.output_console.setPlainText("Code executed without output") # Provide feedback if no output
                 
             except Exception as e:
+                # Handle errors during execution (including syntax errors not caught by compile if any)
                 error_message = str(e)
-                # Extract line number from syntax errors
+                # If error has line number info, try to highlight the line in editor
                 if "line" in error_message and hasattr(e, 'lineno'):
                     line_number = e.lineno
-                    # Move cursor to the error line
                     cursor = self.code_editor.textCursor()
                     cursor.movePosition(QTextCursor.Start)
                     for _ in range(line_number - 1):
                         if not cursor.movePosition(QTextCursor.Down):
-                            break  # Break if we can't move down anymore
+                            break 
                     self.code_editor.setTextCursor(cursor)
                     self.code_editor.highlight_current_line()
                 
                 self.output_console.setPlainText(f"Error: {error_message}")
                 
             self.signals.status_updated.emit("Code executed")
-        except Exception as e:
-            self.output_console.setPlainText(f"System Error: {str(e)}")
+        except Exception as e: # Catch-all for unexpected system errors during execution logic
+            self.output_console.setPlainText(f"System Error during execution: {str(e)}")
+            logger.error(f"System error executing code: {e}")
     
-    def fix_indentation(self, code, error_line):
-        """Try to fix indentation errors automatically."""
+    def fix_indentation(self, code, error_line_num):
+        """Attempts to automatically fix common Python indentation errors."""
         lines = code.split('\n')
         
-        # Make sure we're not out of bounds
-        if error_line <= 0 or error_line > len(lines):
+        if not (0 < error_line_num <= len(lines)): # Validate error line number
             return code
+
+        current_error_line_index = error_line_num - 1
+        prev_line_index = current_error_line_index - 1
+
+        # Get indentation of the error line and the line before it
+        error_line_text = lines[current_error_line_index]
+        leading_spaces_error_line = len(error_line_text) - len(error_line_text.lstrip(' '))
         
-        # Check the line before the error (usually a control statement)
-        prev_line = lines[error_line - 2] if error_line > 1 else ""
-        error_line_text = lines[error_line - 1]
+        prev_line_text = lines[prev_line_index] if prev_line_index >= 0 else ""
+        leading_spaces_prev_line = len(prev_line_text) - len(prev_line_text.lstrip(' '))
+
+        # Case 1: Unexpected indent (current line is more indented than previous, but previous doesn't start a block)
+        if leading_spaces_error_line > leading_spaces_prev_line and not prev_line_text.strip().endswith(':'):
+            lines[current_error_line_index] = ' ' * leading_spaces_prev_line + error_line_text.lstrip(' ')
         
-        error_indent = len(error_line_text) - len(error_line_text.lstrip())
-        prev_indent = len(prev_line) - len(prev_line.lstrip())
-        
-        # For unexpected indent errors (too much indentation)
-        if error_indent > prev_indent and not prev_line.strip().endswith(':'):
-            # Reduce indentation to match previous line
-            lines[error_line - 1] = ' ' * prev_indent + error_line_text.lstrip()
-        
-        # For expected indent after a colon
-        elif prev_line.strip().endswith(':'):
-            # The error line should be indented at least 4 more spaces
-            if not error_line_text.strip():
-                # Empty line, add proper indentation + pass statement
-                lines[error_line - 1] = ' ' * (prev_indent + 4) + 'pass'
-            else:
-                # Line has content, check indentation
-                if error_indent <= prev_indent:
-                    # Need to add more indentation
-                    lines[error_line - 1] = ' ' * (prev_indent + 4) + error_line_text.lstrip()
-        
-        # Check all lines for consistent indentation
-        indentation_levels = []
-        for i, line in enumerate(lines):
+        # Case 2: Expected indent (previous line ends with ':', current line is not more indented)
+        elif prev_line_text.strip().endswith(':'):
+            expected_indent = leading_spaces_prev_line + 4
+            if not error_line_text.strip(): # If the error line is blank
+                lines[current_error_line_index] = ' ' * expected_indent + 'pass' # Add pass
+            elif leading_spaces_error_line < expected_indent : # If line has content but not enough indent
+                 lines[current_error_line_index] = ' ' * expected_indent + error_line_text.lstrip(' ')
+
+        # General pass: Ensure all non-empty, non-comment lines have indentation that's a multiple of 4
+        # This is a heuristic and might not always be correct for complex cases or mixed tabs/spaces.
+        for i in range(len(lines)):
+            line = lines[i]
             if line.strip() and not line.strip().startswith('#'):
-                current_indent = len(line) - len(line.lstrip())
-                
-                # If indentation is not a multiple of 4, fix it
+                current_indent = len(line) - len(line.lstrip(' '))
                 if current_indent % 4 != 0:
-                    # Round to nearest multiple of 4
-                    new_indent = round(current_indent / 4) * 4
-                    lines[i] = ' ' * new_indent + line.lstrip()
+                    # Adjust to the nearest multiple of 4 (could be up or down)
+                    # This part might be too aggressive or not desired, depending on coding style.
+                    # A simpler approach might be to only fix if it's *less* than expected after a colon.
+                    # For now, let's stick to the rounding logic.
+                    new_indent = round(current_indent / 4.0) * 4
+                    lines[i] = ' ' * new_indent + line.lstrip(' ')
         
         return '\n'.join(lines)
+
     
     def file_save(self):
-        """Save the code to a single default file."""
+        """Save the current content of the code editor to a default file."""
         try:
-            # Use a standard filename
-            filename = "gesture_program.py"
+            filename = "gesture_program.py" # Default filename
             
-            # Write code to file
             with open(filename, "w") as f:
-                f.write(self.code_editor.toPlainText())
+                f.write(self.code_editor.toPlainText()) # Write editor content to file
             
             self.signals.status_updated.emit(f"Program saved to {filename}")
         except Exception as e:
             self.signals.status_updated.emit(f"Error saving program: {str(e)}")
+            logger.error(f"Error saving file: {e}")
     
     @pyqtSlot(str)
     def update_status(self, text):
-        """Update the status label."""
+        """Update the text of the status label in the UI."""
         self.status_label.setText(text)
     
     def add_welcome_message(self):
-        """Add a Python code template to the editor."""
+        """Add a default Python code template to the editor when the app starts or editor is cleared."""
         template = """# Main function definition
 def main():
     '''Main program entry point'''
@@ -1066,62 +1077,58 @@ if __name__ == "__main__":
 """
         self.code_editor.setPlainText(template)
         
-        # Set cursor position after the "Your code here" comment
-        cursor = self.code_editor.textCursor()
-        document = self.code_editor.document()
-        
-        # Find the "Your code here" line
-        found = document.find("# Your code here")
-        # Check if text was found (position is not -1)
-        if not found.isNull():
-            cursor.setPosition(found.position())
-            cursor.movePosition(QTextCursor.EndOfLine)
-            cursor.insertText("\n    ")  # Add a new indented line
+        # Find the "# Your code here" line to position the cursor
+        found_cursor_pos = document.find("# Your code here")
+        if not found_cursor_pos.isNull(): # Check if the find operation was successful
+            cursor.setPosition(found_cursor_pos.position()) # Move to the found position
+            cursor.movePosition(QTextCursor.EndOfLine) # Go to the end of that line
+            cursor.insertText("\n    ")  # Insert a newline and indent for the user to start typing
             self.code_editor.setTextCursor(cursor)
         
-        self.signals.status_updated.emit("Ready")
-        self.code_editor.highlight_current_line()
+        self.signals.status_updated.emit("Ready") # Update status
+        self.code_editor.highlight_current_line() # Ensure current line (cursor position) is highlighted
     
     def keyPressEvent(self, event):
-        """Handle keyboard events."""
-        if event.key() == Qt.Key_Q:
+        """Handle specific key press events, e.g., 'Q' to quit."""
+        if event.key() == Qt.Key_Q: # Allow quitting with 'Q' key
             self.close()
         else:
-            super().keyPressEvent(event)
+            super().keyPressEvent(event) # Pass other key events to base class
     
     def closeEvent(self, event):
-        """Handle window close event."""
+        """Handle the window close event to gracefully shut down background threads."""
         try:
-            # Stop background threads
-            if hasattr(self, 'gesture_thread'):
+            # Stop gesture recognition thread if it exists and is running
+            if hasattr(self, 'gesture_thread') and self.gesture_thread.isRunning():
                 self.gesture_thread.stop()
-            if hasattr(self, 'speech_thread'):
+            # Stop speech recognition thread if it exists and is running
+            if hasattr(self, 'speech_thread') and self.speech_thread.isRunning():
                 self.speech_thread.stop()
             
-            event.accept()
+            event.accept() # Accept the close event
         except Exception as e:
-            event.accept()
+            logger.error(f"Error during closeEvent: {e}")
+            event.accept() # Still accept event to ensure window closes
 
     def clear_editor(self):
-        """Clear all content from the code editor and restore the template."""
+        """Clear all content from the code editor and restore the default welcome template."""
         self.code_editor.clear()
-        # Restore the template after clearing
-        self.add_welcome_message()
+        self.add_welcome_message() # Restore template
         self.signals.status_updated.emit("Code editor cleared and template restored")
     
     def process_gesture(self, gesture):
-        """Process recognized gesture and execute corresponding command."""
+        """Maps recognized gestures to specific editor control actions."""
         self.status_label.setText(f"Gesture: {gesture}")
         
-        # Map gestures to editor control actions only
+        # Defines direct mappings from gesture names to editor actions
         gesture_map = {
-            "scroll_down": "cursor_down",     # Move cursor down
-            "scroll_up": "cursor_up",         # Move cursor up
-            "thorns": "indent",               # Indent code
-            "fist": "unindent",               # Unindent code
+            "scroll_down": "cursor_down", 
+            "scroll_up": "cursor_up",
+            "thorns": "indent", # Mapped to increase current_indent level
+            "fist": "unindent", # Mapped to decrease current_indent level
         }
         
-        action = gesture_map.get(gesture)
+        action = gesture_map.get(gesture) # Get corresponding action for the gesture
         if action:
             if action == "cursor_up":
                 self.code_editor.move_cursor_up()
@@ -1131,25 +1138,22 @@ if __name__ == "__main__":
                 cursor = self.code_editor.textCursor()
                 cursor.select(QTextCursor.LineUnderCursor)
                 cursor.removeSelectedText()
-                cursor.deleteChar()  # Delete the newline
-                self.code_editor.setTextCursor(cursor)
-            elif action == "new_line":
-                cursor = self.code_editor.textCursor()
-                cursor.insertText("\n")
+                cursor.deleteChar() 
                 self.code_editor.setTextCursor(cursor)
             elif action == "indent":
-                self.change_indent(1)
-                self.signals.status_updated.emit("Indented code")
+                self.change_indent(1) # Increase indent level for next code block
+                self.signals.status_updated.emit("Indented (next block)")
             elif action == "unindent":
-                self.change_indent(-1)
-                self.signals.status_updated.emit("Unindented code")
+                self.change_indent(-1) # Decrease indent level for next code block
+                self.signals.status_updated.emit("Unindented (next block)")
 
 def main():
-    """Main entry point of the application."""
+    """Main entry point: Initializes and runs the PyQt5 application."""
     app = QApplication(sys.argv)
     window = GestureProgrammingApp()
     window.show()
     sys.exit(app.exec_())
 
 if __name__ == "__main__":
+    # Standard Python construct to run main() when the script is executed
     main()
